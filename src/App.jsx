@@ -51,22 +51,47 @@ const countryMap = {
   "United Kingdom": "recommendations_United_kingdom_easy.json"
 };
 
+function decodeTokenPayload(token) {
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+
+  try {
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+    const json = atob(padded);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function getPlanFromToken(token) {
+  return decodeTokenPayload(token)?.plan || "free";
+}
+
 export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("token"));
+  const [plan, setPlan] = useState(getPlanFromToken(localStorage.getItem("token")));
 
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
   const [signupMessage, setSignupMessage] = useState("");
   const [signupError, setSignupError] = useState("");
   const [signupLoading, setSignupLoading] = useState(false);
   const [missingCity, setMissingCity] = useState("");
+  const [missingCityMessage, setMissingCityMessage] = useState("");
   const [cityGenerateLoading, setCityGenerateLoading] = useState(false);
   const [cityGenerateError, setCityGenerateError] = useState("");
+  const [aiCity, setAiCity] = useState("");
+  const [aiInterests, setAiInterests] = useState("");
+  const [aiResult, setAiResult] = useState(null);
+  const [aiError, setAiError] = useState("");
+  const [aiNotice, setAiNotice] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -74,6 +99,7 @@ export default function App() {
     if (urlToken) {
       localStorage.setItem("token", urlToken);
       setToken(urlToken);
+      setPlan(getPlanFromToken(urlToken));
       setUser({});
       params.delete("token");
       const next = params.toString();
@@ -85,8 +111,9 @@ export default function App() {
   useEffect(() => {
     if (token) {
       setUser({});
+      setPlan(getPlanFromToken(token));
     }
-  }, [token]);
+  }, [token, plan]);
 
   useEffect(() => {
     if (!token) return;
@@ -960,12 +987,15 @@ export default function App() {
     }
 
     if (citySearchInput && citySearchBtn) {
+      const canGenerateCity = plan === "basic" || plan === "premium";
+
       const onCitySearch = async () => {
         if (isSearchLoading) return;
 
         const raw = citySearchInput.value.trim();
         if (!raw) {
           setMissingCity("");
+          setMissingCityMessage("");
           setCityGenerateError("");
           errorMsg.textContent = "Please enter a city name.";
           return;
@@ -973,6 +1003,7 @@ export default function App() {
 
         if (raw.length > 10) {
           setMissingCity("");
+          setMissingCityMessage("");
           setCityGenerateError("");
           errorMsg.textContent = "City name must be 10 characters or less.";
           return;
@@ -982,6 +1013,7 @@ export default function App() {
         errorMsg.textContent = "";
         resultWrapper.style.display = "none";
         setMissingCity("");
+        setMissingCityMessage("");
         setCityGenerateError("");
         isSearchLoading = true;
         citySearchBtn.disabled = true;
@@ -996,6 +1028,7 @@ export default function App() {
           const result = await findCityAcrossCountries(raw);
           if (result.match) {
             setMissingCity("");
+            setMissingCityMessage("");
             setCityGenerateError("");
             pendingSelection = {
               country: result.match.country,
@@ -1016,7 +1049,16 @@ export default function App() {
           if (result.suggestion) {
             errorMsg.textContent = `City not found. Did you mean ${result.suggestion.city}, ${result.suggestion.country}?`;
           } else {
-            errorMsg.textContent = "City not found.";
+            errorMsg.textContent = "";
+          }
+
+          if (canGenerateCity) {
+            setMissingCityMessage(`Generating data for ${raw}...`);
+            generateCityRoute(raw);
+          } else {
+            setMissingCityMessage(
+              "This city is not available in our offer. If you want to create it, you need to subscribe to one of the available subscription models."
+            );
           }
         } catch (err) {
           console.error(err);
@@ -1229,6 +1271,7 @@ export default function App() {
       localStorage.setItem("token", data.token);
       setToken(data.token);
       setUser(data.user);
+      setPlan(data.user?.plan || getPlanFromToken(data.token));
     } catch (err) {
       setError(err.message);
     }
@@ -1238,37 +1281,16 @@ export default function App() {
     localStorage.removeItem("token");
     setToken(null);
     setUser(null);
+    setPlan("free");
     setError("");
   }
 
-  async function askAI() {
-    setLoading(true);
-    setAnswer("");
-    setError("");
-
-    try {
-      const res = await fetch(`${API}/api/ask`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ question })
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      setAnswer(JSON.stringify(data, null, 2));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+  async function generateCityRoute(cityName = missingCity) {
+    if (!cityName || cityGenerateLoading) return;
+    if (!(plan === "basic" || plan === "premium")) {
+      setCityGenerateError("Your plan does not allow adding new cities.");
+      return;
     }
-  }
-
-  async function generateCityRoute() {
-    if (!missingCity || cityGenerateLoading) return;
 
     setCityGenerateLoading(true);
     setCityGenerateError("");
@@ -1280,7 +1302,7 @@ export default function App() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ city: missingCity })
+        body: JSON.stringify({ city: cityName })
       });
 
       const data = await res.json();
@@ -1289,6 +1311,7 @@ export default function App() {
       if (window.routePlannerEasy?.selectLocation) {
         window.routePlannerEasy.selectLocation(data.country, data.city, true);
         setMissingCity("");
+        setMissingCityMessage("");
       } else {
         setCityGenerateError("Route planner is not ready yet.");
       }
@@ -1298,6 +1321,66 @@ export default function App() {
       setCityGenerateLoading(false);
     }
   }
+
+  async function askPremiumGuide() {
+    if (aiLoading) return;
+    const city = aiCity.trim();
+    const interests = aiInterests.trim();
+
+    setAiError("");
+    setAiNotice("");
+    setAiResult(null);
+
+    if (!city || !interests) {
+      setAiError("City and interests are required.");
+      return;
+    }
+
+    setAiLoading(true);
+    try {
+      const generatePromise = fetch(`${API}/api/cities/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ city })
+      });
+
+      const personalizedPromise = fetch(`${API}/api/ask/personalized`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ city, interests })
+      });
+
+      const [generateRes, personalizedRes] = await Promise.all([
+        generatePromise,
+        personalizedPromise
+      ]);
+
+      if (!generateRes.ok) {
+        const generateData = await generateRes.json().catch(() => ({}));
+        setAiNotice(generateData.error || "Failed to save city data.");
+      }
+
+      const personalizedData = await personalizedRes.json().catch(() => ({}));
+      if (!personalizedRes.ok) {
+        throw new Error(personalizedData.error || "Failed to generate personalized guide.");
+      }
+
+      setAiResult(personalizedData);
+    } catch (err) {
+      setAiError(err.message || "Failed to generate personalized guide.");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  const canGenerateCity = plan === "basic" || plan === "premium";
+  const isPremium = plan === "premium";
 
   if (!token) {
     return (
@@ -1317,12 +1400,27 @@ export default function App() {
 
           <label className="login-field">
             Password
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <div className="password-field">
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                className="password-toggle"
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
+            </div>
           </label>
 
           <button onClick={login} className="btn">
@@ -1395,16 +1493,30 @@ export default function App() {
               </button>
               {missingCity && (
                 <div className="city-search-missing">
-                  <div className="form-error">We don't have this City</div>
-                  <button
-                    onClick={generateCityRoute}
-                    disabled={cityGenerateLoading}
-                    className="btn"
-                    type="button"
-                  >
-                    {cityGenerateLoading ? "Thinking..." : "Generate the route"}
-                  </button>
-                  {cityGenerateError && <div className="form-error">{cityGenerateError}</div>}
+                  <div className={canGenerateCity ? "form-success" : "form-error"}>
+                    {missingCityMessage ||
+                      (canGenerateCity
+                        ? `Generating data for ${missingCity}...`
+                        : "This city is not available in our offer. If you want to create it, you need to subscribe to one of the available subscription models.")}
+                  </div>
+                  {!canGenerateCity && (
+                    <button className="btn ghost" type="button">
+                      Subscription models
+                    </button>
+                  )}
+                  {canGenerateCity && cityGenerateError && (
+                    <div className="form-error">{cityGenerateError}</div>
+                  )}
+                  {canGenerateCity && cityGenerateError && (
+                    <button
+                      onClick={() => generateCityRoute(missingCity)}
+                      disabled={cityGenerateLoading}
+                      className="btn"
+                      type="button"
+                    >
+                      {cityGenerateLoading ? "Thinking..." : "Try again"}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1489,29 +1601,105 @@ export default function App() {
           </div>
         </section>
 
-        <section className="ai-section">
-          <div className="ai-panel">
-            <div className="ai-panel-header">
-              <h2>Ask the AI Guide</h2>
-              <p>Get a custom answer for any city vibe, route, or idea.</p>
+        {isPremium && (
+          <section className="ai-section">
+            <div className="ai-panel">
+              <div className="ai-panel-header">
+                <h2>Ask the AI Guide</h2>
+                <p>Get a personalized schedule based on your interests.</p>
+              </div>
+              <div className="ai-panel-body">
+                <label className="ai-field">
+                  City
+                  <input
+                    type="text"
+                    value={aiCity}
+                    onChange={(e) => setAiCity(e.target.value)}
+                    placeholder="Lisbon"
+                  />
+                </label>
+                <label className="ai-field">
+                  Interests
+                  <input
+                    type="text"
+                    value={aiInterests}
+                    onChange={(e) => setAiInterests(e.target.value)}
+                    placeholder="street food, modern art, live music"
+                  />
+                </label>
+                <button onClick={askPremiumGuide} disabled={aiLoading} className="btn">
+                  {aiLoading ? "Thinking..." : "Ask"}
+                </button>
+                {aiError && <div className="form-error">{aiError}</div>}
+                {aiNotice && <div className="form-success">{aiNotice}</div>}
+                {aiResult && (
+                  <div className="ai-result">
+                    <div className="ai-result-title">
+                      Personalized schedule for {aiResult.city || aiCity}
+                    </div>
+                    {Array.isArray(aiResult.itinerary) ? (
+                      <div className="ai-itinerary">
+                        {aiResult.itinerary.map((item, index) => {
+                          const link = item?.map_link || "";
+                          const title = item?.title || "Stop";
+                          return (
+                            <div className="ai-itinerary-item" key={`${title}-${index}`}>
+                              <div className="ai-itinerary-time">{item?.time || "--:--"}</div>
+                              <div className="ai-itinerary-body">
+                                <div className="ai-itinerary-title">
+                                  {link ? (
+                                    <a href={link} target="_blank" rel="noopener noreferrer">
+                                      {title}
+                                    </a>
+                                  ) : (
+                                    title
+                                  )}
+                                </div>
+                                {item?.type && (
+                                  <div className="ai-itinerary-type">{item.type}</div>
+                                )}
+                                {item?.description && <p>{item.description}</p>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <textarea
+                        rows={10}
+                        readOnly
+                        value={JSON.stringify(aiResult, null, 2)}
+                        className="ai-answer"
+                      />
+                    )}
+                    {Array.isArray(aiResult.tips) && aiResult.tips.length > 0 && (
+                      <div className="ai-tips">
+                        <h4>Tips</h4>
+                        <ul>
+                          {aiResult.tips.map((tip, index) => {
+                            const label = tip?.tip || "Tip";
+                            const link = tip?.map_link;
+                            return (
+                              <li key={`${label}-${index}`}>
+                                {link ? (
+                                  <a href={link} target="_blank" rel="noopener noreferrer">
+                                    {label}
+                                  </a>
+                                ) : (
+                                  label
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="ai-panel-body">
-              <textarea
-                rows={4}
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Ask for a nightlife plan in Berlin, a museum day in Vienna, or a food crawl in Lisbon."
-              />
-              <button onClick={askAI} disabled={loading} className="btn">
-                {loading ? "Thinking..." : "Ask"}
-              </button>
-              {error && <div className="form-error">{error}</div>}
-              {answer && (
-                <textarea rows={12} readOnly value={answer} className="ai-answer" />
-              )}
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
       </main>
 
       <footer className="site-footer" data-include="/components/footer.html">
