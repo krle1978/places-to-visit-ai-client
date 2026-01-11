@@ -61,6 +61,26 @@ export default function App() {
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [signupMessage, setSignupMessage] = useState("");
+  const [signupError, setSignupError] = useState("");
+  const [signupLoading, setSignupLoading] = useState(false);
+  const [missingCity, setMissingCity] = useState("");
+  const [cityGenerateLoading, setCityGenerateLoading] = useState(false);
+  const [cityGenerateError, setCityGenerateError] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get("token");
+    if (urlToken) {
+      localStorage.setItem("token", urlToken);
+      setToken(urlToken);
+      setUser({});
+      params.delete("token");
+      const next = params.toString();
+      const newUrl = window.location.pathname + (next ? `?${next}` : "");
+      window.history.replaceState({}, document.title, newUrl);
+    }
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -945,11 +965,15 @@ export default function App() {
 
         const raw = citySearchInput.value.trim();
         if (!raw) {
+          setMissingCity("");
+          setCityGenerateError("");
           errorMsg.textContent = "Please enter a city name.";
           return;
         }
 
         if (raw.length > 10) {
+          setMissingCity("");
+          setCityGenerateError("");
           errorMsg.textContent = "City name must be 10 characters or less.";
           return;
         }
@@ -957,6 +981,8 @@ export default function App() {
         openPlannerPanel();
         errorMsg.textContent = "";
         resultWrapper.style.display = "none";
+        setMissingCity("");
+        setCityGenerateError("");
         isSearchLoading = true;
         citySearchBtn.disabled = true;
 
@@ -969,6 +995,8 @@ export default function App() {
 
           const result = await findCityAcrossCountries(raw);
           if (result.match) {
+            setMissingCity("");
+            setCityGenerateError("");
             pendingSelection = {
               country: result.match.country,
               city: result.match.city,
@@ -984,6 +1012,7 @@ export default function App() {
             return;
           }
 
+          setMissingCity(raw);
           if (result.suggestion) {
             errorMsg.textContent = `City not found. Did you mean ${result.suggestion.city}, ${result.suggestion.country}?`;
           } else {
@@ -1134,9 +1163,9 @@ export default function App() {
     }
 
     window.routePlannerEasy = window.routePlannerEasy || {};
-    window.routePlannerEasy.selectLocation = function (countryName, cityName) {
+    window.routePlannerEasy.selectLocation = function (countryName, cityName, autoSubmit = false) {
       if (!countryName) return;
-      pendingSelection = { country: countryName, city: cityName };
+      pendingSelection = { country: countryName, city: cityName, autoSubmit: Boolean(autoSubmit) };
 
       openPlannerPanel();
 
@@ -1154,8 +1183,39 @@ export default function App() {
     return () => cleanup.forEach((fn) => fn());
   }, [token]);
 
+  async function signup() {
+    setSignupError("");
+    setSignupMessage("");
+    setError("");
+
+    if (!email || !password) {
+      setSignupError("Email and password required.");
+      return;
+    }
+
+    setSignupLoading(true);
+    try {
+      const res = await fetch(`${API}/api/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Signup failed.");
+
+      setSignupMessage(data.message || "Check your email to confirm your account.");
+    } catch (err) {
+      setSignupError(err.message);
+    } finally {
+      setSignupLoading(false);
+    }
+  }
+
   async function login() {
     setError("");
+    setSignupMessage("");
+    setSignupError("");
     try {
       const res = await fetch(`${API}/api/auth/login`, {
         method: "POST",
@@ -1207,6 +1267,38 @@ export default function App() {
     }
   }
 
+  async function generateCityRoute() {
+    if (!missingCity || cityGenerateLoading) return;
+
+    setCityGenerateLoading(true);
+    setCityGenerateError("");
+
+    try {
+      const res = await fetch(`${API}/api/cities/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ city: missingCity })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to generate city data.");
+
+      if (window.routePlannerEasy?.selectLocation) {
+        window.routePlannerEasy.selectLocation(data.country, data.city, true);
+        setMissingCity("");
+      } else {
+        setCityGenerateError("Route planner is not ready yet.");
+      }
+    } catch (err) {
+      setCityGenerateError(err.message);
+    } finally {
+      setCityGenerateLoading(false);
+    }
+  }
+
   if (!token) {
     return (
       <div className="login-shell">
@@ -1237,6 +1329,12 @@ export default function App() {
             Login
           </button>
 
+          <button onClick={signup} className="btn ghost" type="button" disabled={signupLoading}>
+            {signupLoading ? "Sending..." : "Signup"}
+          </button>
+
+          {signupError && <div className="form-error">{signupError}</div>}
+          {signupMessage && <div className="form-success">{signupMessage}</div>}
           {error && <div className="form-error">{error}</div>}
         </div>
       </div>
@@ -1295,6 +1393,20 @@ export default function App() {
               <button id="city-search-btn" className="btn" type="button">
                 Find This City
               </button>
+              {missingCity && (
+                <div className="city-search-missing">
+                  <div className="form-error">We don't have this City</div>
+                  <button
+                    onClick={generateCityRoute}
+                    disabled={cityGenerateLoading}
+                    className="btn"
+                    type="button"
+                  >
+                    {cityGenerateLoading ? "Thinking..." : "Generate the route"}
+                  </button>
+                  {cityGenerateError && <div className="form-error">{cityGenerateError}</div>}
+                </div>
+              )}
             </div>
 
             <div id="category-selector">

@@ -141,6 +141,17 @@
   padding: 0;
 }
 
+.login-card .btn.ghost {
+  padding: 0.65rem 1.8rem;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.login-card .btn.ghost:disabled {
+  border-color: #9db7ab;
+  color: #9db7ab;
+}
+
 .image-btn-link {
   display: inline-flex;
   align-items: center;
@@ -510,6 +521,11 @@
 
 .form-error {
   color: #b42318;
+  font-weight: 600;
+}
+
+.form-success {
+  color: #0f7a43;
   font-weight: 600;
 }
 
