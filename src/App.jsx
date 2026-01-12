@@ -1225,6 +1225,18 @@ export default function App() {
     return () => cleanup.forEach((fn) => fn());
   }, [token]);
 
+  useEffect(() => {
+    const scrollTopBtn = document.getElementById("scrollToTopBtn");
+    if (!scrollTopBtn) return;
+
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    scrollTopBtn.addEventListener("click", scrollToTop);
+    return () => scrollTopBtn.removeEventListener("click", scrollToTop);
+  }, [token]);
+
   async function signup() {
     setSignupError("");
     setSignupMessage("");
@@ -1382,6 +1394,10 @@ export default function App() {
   const canGenerateCity = plan === "basic" || plan === "premium";
   const isPremium = plan === "premium";
 
+  const openSubscriptions = () => {
+    window.location.href = "/subscription.html";
+  };
+
   if (!token) {
     return (
       <div className="login-shell">
@@ -1500,7 +1516,7 @@ export default function App() {
                         : "This city is not available in our offer. If you want to create it, you need to subscribe to one of the available subscription models.")}
                   </div>
                   {!canGenerateCity && (
-                    <button className="btn ghost" type="button">
+                    <button className="btn ghost" type="button" onClick={openSubscriptions}>
                       Subscription models
                     </button>
                   )}
