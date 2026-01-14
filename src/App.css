@@ -34,7 +34,7 @@
 }
 
 .brand {
-  max-width: clamp(180px, 24vw, 320px);
+  max-width: clamp(240px, 36vw, 520px);
   height: auto;
   display: block;
 }
@@ -42,6 +42,11 @@
 .header-subtitle {
   color: var(--muted);
   margin-top: 0.4rem;
+}
+
+.header-user {
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
 .hero {
@@ -638,6 +643,14 @@
   align-items: center;
   justify-content: center;
   padding: 2rem;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.login-banner {
+  width: min(520px, 90vw);
+  height: auto;
+  display: block;
 }
 
 .login-card {
@@ -714,6 +727,19 @@
 .form-success {
   color: #0f7a43;
   font-weight: 600;
+}
+
+.name-status {
+  font-weight: 600;
+  margin-top: -0.4rem;
+}
+
+.name-status.available {
+  color: #0f7a43;
+}
+
+.name-status.taken {
+  color: #b42318;
 }
 
 .scroll-top-btn {

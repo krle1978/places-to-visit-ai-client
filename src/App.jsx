@@ -74,8 +74,10 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [name, setName] = useState("");
+  const [nameStatus, setNameStatus] = useState("idle");
   const [showPassword, setShowPassword] = useState(false);
-  const [, setUser] = useState(null);
+  const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [plan, setPlan] = useState(getPlanFromToken(localStorage.getItem("token")));
   const [activeAuthTab, setActiveAuthTab] = useState("login");
@@ -103,7 +105,6 @@ export default function App() {
       localStorage.setItem("token", urlToken);
       setToken(urlToken);
       setPlan(getPlanFromToken(urlToken));
-      setUser({});
       params.delete("token");
       const next = params.toString();
       const newUrl = window.location.pathname + (next ? `?${next}` : "");
@@ -112,11 +113,88 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (token) {
-      setUser({});
-      setPlan(getPlanFromToken(token));
+    if (!token) {
+      setUser(null);
+      setPlan("free");
+      return;
     }
-  }, [token, plan]);
+
+    setPlan(getPlanFromToken(token));
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadUser() {
+      try {
+        const res = await fetch(`${API}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to load user profile.");
+        }
+        if (!cancelled) {
+          setUser(data);
+          if (data?.plan) {
+            setPlan(data.plan);
+          }
+        }
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        console.error(err);
+        if (!cancelled) setUser(null);
+      }
+    }
+
+    loadUser();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (activeAuthTab !== "signup") {
+      setNameStatus("idle");
+      return;
+    }
+
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setNameStatus("idle");
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${API}/api/auth/name-check?name=${encodeURIComponent(trimmed)}`,
+          { signal: controller.signal }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to check name.");
+        }
+        if (!cancelled) {
+          setNameStatus(data.available ? "available" : "taken");
+        }
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        console.error(err);
+        if (!cancelled) setNameStatus("idle");
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [name, activeAuthTab]);
 
   useEffect(() => {
     const cleanup = [];
@@ -1406,6 +1484,10 @@ export default function App() {
     setSignupMessage("");
     setError("");
 
+    if (!name.trim()) {
+      setSignupError("Name is required.");
+      return;
+    }
     if (!email || !password) {
       setSignupError("Email and password required.");
       return;
@@ -1422,13 +1504,17 @@ export default function App() {
       setSignupError("Passwords do not match.");
       return;
     }
+    if (nameStatus === "taken") {
+      setSignupError("Name already exists.");
+      return;
+    }
 
     setSignupLoading(true);
     try {
       const res = await fetch(`${API}/api/auth/signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ name: name.trim(), email, password })
       });
 
       const data = await res.json();
@@ -1486,11 +1572,18 @@ export default function App() {
   }
 
   const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  const nameIsValid = Boolean(name.trim());
   const emailIsValid = isValidEmail(email);
   const passwordIsValid = password.length >= 8;
   const confirmMatches = password === confirmPassword;
   const canLogin = emailIsValid && passwordIsValid;
-  const canSignup = emailIsValid && passwordIsValid && confirmMatches && !signupLoading;
+  const canSignup =
+    nameIsValid &&
+    emailIsValid &&
+    passwordIsValid &&
+    confirmMatches &&
+    nameStatus !== "taken" &&
+    !signupLoading;
   const planKey = String(plan || "")
     .toLowerCase()
     .replace(/\s+/g, "_")
@@ -1498,6 +1591,7 @@ export default function App() {
   const isFree = planKey === "free";
   const isPremium = planKey === "premium" || planKey === "premium_plus";
   const canGenerateCity = planKey === "basic" || isPremium;
+  const greetingName = user?.name || user?.email || "";
 
   async function generateCityRoute(cityName = missingCity) {
     if (!cityName || cityGenerateLoading) return;
@@ -1634,6 +1728,11 @@ export default function App() {
   if (!token) {
     return (
       <div className="login-shell">
+        <img
+          className="login-banner"
+          src="/Banner/Places To Visit Banner.png"
+          alt="Places To Visit"
+        />
         <div className="login-card">
           <h2>Welcome back</h2>
           <p className="login-tagline">Access your personalized city planner.</p>
@@ -1733,6 +1832,27 @@ export default function App() {
             </>
           ) : (
             <>
+              <label className="login-field">
+                Name
+                <input
+                  type="text"
+                  placeholder="Name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoComplete="name"
+                  required
+                />
+              </label>
+              {name.trim() && nameStatus !== "idle" && (
+                <div
+                  className={`name-status ${
+                    nameStatus === "available" ? "available" : "taken"
+                  }`}
+                >
+                  {nameStatus === "available" ? "New User" : "Existing User"}
+                </div>
+              )}
+
               <label className="login-field">
                 Email
                 <input
@@ -1837,7 +1957,11 @@ export default function App() {
             src="/Banner/Places To Visit Banner.png"
             alt="Places To Visit"
           />
-          <div className="header-subtitle">Smart city travel planner for curious minds.</div>
+          {user?.email && (
+            <div className="header-user">
+              Welcome {greetingName}
+            </div>
+          )}
         </div>
         <button
           className="image-btn logout-btn"
